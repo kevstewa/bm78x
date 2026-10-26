@@ -632,7 +632,7 @@ impl RtcTime {
         check("year", year, 2000..=2098)?;
         check("month", month.into(), 1..=12)?;
         let days_in_month = match month {
-            2 if year % 4 == 0 => 29, // every fourth year is a leap year until 2100
+            2 if year.is_multiple_of(4) => 29, // every fourth year is a leap year until 2100
             2 => 28,
             4 | 6 | 9 | 11 => 30,
             _ => 31,
