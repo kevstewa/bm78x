@@ -1,0 +1,28 @@
+[package]
+name = "bm78x"
+description = "Protocol decoder and client for Brymen BM78xBT Bluetooth multimeters"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/kevstewa/bm78x"
+readme = "README.md"
+keywords = ["brymen", "multimeter", "bluetooth", "ble", "bm787"]
+categories = ["hardware-support"]
+
+[dependencies]
+futures-util = "0.3.34"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
+zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
+
+[dev-dependencies]
+proptest = "1.12.0"
+tokio = { version = "1.54.1", features = ["macros", "rt", "signal", "test-util"] }
+zbus = { version = "6.1.0", default-features = false, features = ["tokio", "p2p", "service", "object-manager"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
