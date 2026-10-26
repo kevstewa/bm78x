@@ -568,20 +568,21 @@ pub enum Weekday {
 }
 
 impl Weekday {
-    /// The day as the meter's clock command carries it, 1 to 7.
+    /// The day as the meter's clock command carries it, 0 to 6.
     ///
-    /// Inferred: Monday is 1 and Sunday is 7, as in ISO 8601. Brymen gives
-    /// only the range, and the meter neither reports the weekday back nor
-    /// displays it.
+    /// Brymen's document gives the range as 1 to 7, but a BM787BT takes 0
+    /// to 6 and refuses 7. Inferred: Sunday is 0, as in C's `tm_wday`. The
+    /// meter neither reports the weekday back nor displays it, so which day
+    /// it takes 0 to be cannot be seen.
     fn number(self) -> u8 {
         match self {
+            Weekday::Sunday => 0,
             Weekday::Monday => 1,
             Weekday::Tuesday => 2,
             Weekday::Wednesday => 3,
             Weekday::Thursday => 4,
             Weekday::Friday => 5,
             Weekday::Saturday => 6,
-            Weekday::Sunday => 7,
         }
     }
 }
@@ -602,14 +603,16 @@ pub struct RtcTime {
 impl RtcTime {
     /// A time with the given fields.
     ///
-    /// The weekday is not checked against the date: the meter takes both as
-    /// given.
+    /// The checks are those a BM787BT makes, found by trying each boundary
+    /// on one; Brymen's document gives wider ranges than the meter takes.
+    /// The weekday is not checked against the date, and the meter does not
+    /// check it either.
     ///
     /// # Errors
     ///
     /// [`ProtocolError::RtcOutOfRange`] if a field is outside the range the
-    /// meter accepts: years 2000 to 2099, months 1 to 12, days 1 to 31,
-    /// hours 0 to 23, minutes and seconds 0 to 59.
+    /// meter accepts: years 2000 to 2098, months 1 to 12, a day that exists
+    /// in that month and year, hours 0 to 23, minutes and seconds 0 to 59.
     pub fn new(
         year: u16,
         month: u8,
@@ -626,9 +629,15 @@ impl RtcTime {
                 Err(ProtocolError::RtcOutOfRange { field, value })
             }
         };
-        check("year", year, 2000..=2099)?;
+        check("year", year, 2000..=2098)?;
         check("month", month.into(), 1..=12)?;
-        check("day", day.into(), 1..=31)?;
+        let days_in_month = match month {
+            2 if year % 4 == 0 => 29, // every fourth year is a leap year until 2100
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        check("day", day.into(), 1..=days_in_month)?;
         check("hour", hour.into(), 0..=23)?;
         check("minute", minute.into(), 0..=59)?;
         check("second", second.into(), 0..=59)?;
@@ -643,7 +652,7 @@ impl RtcTime {
         })
     }
 
-    /// The year, 2000 to 2099.
+    /// The year, 2000 to 2098.
     pub fn year(&self) -> u16 {
         self.year
     }
@@ -653,7 +662,7 @@ impl RtcTime {
         self.month
     }
 
-    /// The day of the month, 1 to 31.
+    /// The day of the month.
     pub fn day(&self) -> u8 {
         self.day
     }
@@ -742,17 +751,19 @@ mod tests {
     }
 
     #[test]
-    fn weekdays_count_from_monday() {
+    fn weekdays_count_from_sunday_as_0() {
+        // A BM787BT takes 0 to 6 and refuses 7, though Brymen's document
+        // says 1 to 7.
         let days = [
+            Weekday::Sunday,
             Weekday::Monday,
             Weekday::Tuesday,
             Weekday::Wednesday,
             Weekday::Thursday,
             Weekday::Friday,
             Weekday::Saturday,
-            Weekday::Sunday,
         ];
-        for (n, day) in (1..).zip(days) {
+        for (n, day) in (0..).zip(days) {
             let time = RtcTime::new(2026, 10, 23, day, 0, 0, 0).unwrap();
             assert_eq!(time.weekday(), day);
             assert_eq!(time.to_args()[4], n, "{day:?}");
@@ -764,22 +775,29 @@ mod tests {
         let new = |year, month, day, hour, minute, second| {
             RtcTime::new(year, month, day, Weekday::Sunday, hour, minute, second)
         };
-        let late = new(2099, 12, 31, 23, 59, 59).unwrap();
-        assert_eq!((late.year(), late.month(), late.day()), (2099, 12, 31));
+        // The ranges a BM787BT accepts, found by trying each boundary on
+        // one. It refuses 2099, and dates that do not exist.
+        let late = new(2098, 12, 31, 23, 59, 59).unwrap();
+        assert_eq!((late.year(), late.month(), late.day()), (2098, 12, 31));
         assert_eq!((late.hour(), late.minute(), late.second()), (23, 59, 59));
-        assert_eq!(late.to_args()[6], 99);
+        assert_eq!(late.to_args()[6], 98);
         let early = new(2000, 1, 1, 0, 0, 0).unwrap();
-        assert_eq!(early.to_args(), [0, 0, 0, 1, 7, 1, 0]);
+        assert_eq!(early.to_args(), [0, 0, 0, 1, 0, 1, 0]);
+        assert!(new(2028, 2, 29, 0, 0, 0).is_ok(), "a leap day");
+        assert!(new(2000, 2, 29, 0, 0, 0).is_ok(), "a leap day");
         let bad = [
             (new(1999, 12, 31, 23, 59, 59), "year", 1999),
-            (new(2100, 12, 31, 23, 59, 59), "year", 2100),
-            (new(2099, 0, 31, 23, 59, 59), "month", 0),
-            (new(2099, 13, 31, 23, 59, 59), "month", 13),
-            (new(2099, 12, 0, 23, 59, 59), "day", 0),
-            (new(2099, 12, 32, 23, 59, 59), "day", 32),
-            (new(2099, 12, 31, 24, 59, 59), "hour", 24),
-            (new(2099, 12, 31, 23, 60, 59), "minute", 60),
-            (new(2099, 12, 31, 23, 59, 60), "second", 60),
+            (new(2099, 1, 1, 0, 0, 0), "year", 2099),
+            (new(2098, 0, 31, 23, 59, 59), "month", 0),
+            (new(2098, 13, 31, 23, 59, 59), "month", 13),
+            (new(2098, 12, 0, 23, 59, 59), "day", 0),
+            (new(2098, 12, 32, 23, 59, 59), "day", 32),
+            (new(2026, 11, 31, 0, 0, 0), "day", 31),
+            (new(2026, 2, 29, 0, 0, 0), "day", 29),
+            (new(2026, 2, 30, 0, 0, 0), "day", 30),
+            (new(2098, 12, 31, 24, 59, 59), "hour", 24),
+            (new(2098, 12, 31, 23, 60, 59), "minute", 60),
+            (new(2098, 12, 31, 23, 59, 60), "second", 60),
         ];
         for (time, field, value) in bad {
             assert_eq!(time, Err(ProtocolError::RtcOutOfRange { field, value }));

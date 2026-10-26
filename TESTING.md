@@ -75,6 +75,20 @@ On 2026-10-24, through bm78x-tui:
 - The same while a scan runs: it reconnects, once after BlueZ aborted the
   first attempt (`le-connection-abort-by-local`).
 
+On 2026-10-25, setting the clock with each field at the edges of its range
+and beyond:
+
+- The weekday must be 0 to 6; 7 and 8 are refused with error code 2, out of
+  setting range. Brymen's document says 1 to 7. This crate first sent
+  Monday as 1 and Sunday as 7, so setting the clock failed on Sundays.
+- The year must be 2000 to 2098; 2099 is refused, though the document says
+  2099 is allowed.
+- The meter checks the date: 2026-11-31, 2026-02-29 and 2026-02-30 are
+  refused and 2028-02-29 accepted. It does not check the weekday against
+  the date. It also accepts day 0, which this crate does not send.
+- Seconds and minutes 0 to 59, hours 0 to 23 and months 1 to 12 are as the
+  document says.
+
 The frames are in `tests/captures/`, and `tests/captures.rs` checks them
 against what was observed.
 
@@ -87,5 +101,6 @@ Details neither Brymen's document nor the tests can settle:
   for every other field. Brymen's phone app does not show the version, and
   the one the meter shows when switched on holding Δ (`T8712`) is the
   meter's own firmware, not the Bluetooth module's.
-- **Weekday**: does the meter count Monday or Sunday as 1? Only the RTC
-  command carries it, and the meter neither sends it back nor displays it.
+- **Weekday**: the meter takes 0 to 6, but which day is 0? This crate sends
+  Sunday as 0. Only the RTC command carries the weekday, and the meter
+  neither sends it back nor displays it.
