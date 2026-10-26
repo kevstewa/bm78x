@@ -61,10 +61,10 @@ The protocol follows Brymen's "BM78xBT Wireless Data Communication
 Protocol", revision 4. Where that document is silent, the source says what a
 BM787BT does, or marks the detail "Inferred". It has been tested on a
 BM787BT; the BM788BT, which the same document covers, has not been tried.
-[TESTING.md](https://github.com/kevstewa/bm78x/blob/main/TESTING.md) says
-what the tests check and what has been confirmed on the meter.
+[TESTING.md](TESTING.md) says what the tests check and what has been
+confirmed on the meter.
 
-[bm78x-tui](https://github.com/kevstewa/bm78x-tui) is a terminal UI built
+[bm78x-tui](https://crates.io/crates/bm78x-tui) is a terminal UI built
 on this library.
 
 Licensed under the MIT license.
