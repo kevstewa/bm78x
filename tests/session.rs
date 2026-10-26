@@ -811,3 +811,35 @@ fn a_session_can_be_debugged() {
     assert!(debug.starts_with("Session"), "{debug}");
     assert!(debug.contains("idle_after"), "{debug}");
 }
+
+#[test]
+fn applications_can_make_events_to_test_their_handling() {
+    let raw = frame(7);
+    let parsed = Frame::parse(&raw).unwrap();
+    match SessionEvent::frame(parsed, raw.clone()) {
+        SessionEvent::Frame {
+            frame, raw: kept, ..
+        } => {
+            assert_eq!(frame, parsed);
+            assert_eq!(kept, raw);
+        }
+        other => panic!("expected a frame, got {other:?}"),
+    }
+    match SessionEvent::connected(MAC) {
+        SessionEvent::Connected { address, .. } => assert_eq!(address, MAC),
+        other => panic!("expected Connected, got {other:?}"),
+    }
+    let short = raw[..20].to_vec();
+    let error = Frame::parse(&short).unwrap_err();
+    match SessionEvent::bad_frame(error, short.clone()) {
+        SessionEvent::BadFrame {
+            error: kept_error,
+            raw: kept,
+            ..
+        } => {
+            assert_eq!(kept_error, error);
+            assert_eq!(kept, short);
+        }
+        other => panic!("expected BadFrame, got {other:?}"),
+    }
+}

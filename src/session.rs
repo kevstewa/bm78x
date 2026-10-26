@@ -122,6 +122,26 @@ pub enum SessionEvent {
     Disconnected(DisconnectReason),
 }
 
+/// Constructors for the variants with named fields, which can gain fields
+/// and so cannot be built directly outside this crate. A session makes its
+/// own events; these are for testing code that handles them.
+impl SessionEvent {
+    /// A [`SessionEvent::Connected`] event.
+    pub fn connected(address: MacAddress) -> Self {
+        SessionEvent::Connected { address }
+    }
+
+    /// A [`SessionEvent::Frame`] event.
+    pub fn frame(frame: Frame, raw: Vec<u8>) -> Self {
+        SessionEvent::Frame { frame, raw }
+    }
+
+    /// A [`SessionEvent::BadFrame`] event.
+    pub fn bad_frame(error: ProtocolError, raw: Vec<u8>) -> Self {
+        SessionEvent::BadFrame { error, raw }
+    }
+}
+
 /// Why a [`SessionEvent::Disconnected`] happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -260,9 +280,7 @@ impl<T: Transport> Session<T> {
                             last_heard: Instant::now(),
                             idle: false,
                         };
-                        Ok(SessionEvent::Connected {
-                            address: self.transport.address(),
-                        })
+                        Ok(SessionEvent::connected(self.transport.address()))
                     }
                     Err(error) => {
                         self.state = State::Down { retry: true };
