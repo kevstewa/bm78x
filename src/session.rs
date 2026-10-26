@@ -48,7 +48,8 @@ pub struct SessionConfig {
     pub check_model: bool,
     /// If set, called after each connect to get the time to set the meter's
     /// clock to. The meter has no clock battery, so its clock is otherwise
-    /// wrong.
+    /// wrong. If the meter refuses the time, the session reports
+    /// [`SessionEvent::ClockRefused`] and carries on.
     pub clock: Option<Clock>,
     /// Silence after which [`SessionEvent::Idle`] is reported. Longer than
     /// the gap between a BM787BT's slowest updates, about 2.5 s, which come
@@ -98,6 +99,10 @@ pub enum SessionEvent {
     /// A connect attempt failed. The session retries after
     /// [`SessionConfig::reconnect_delay`].
     ConnectFailed(SessionError),
+    /// The meter refused the time from [`SessionConfig::clock`]. Reported
+    /// after [`SessionEvent::Connected`]; the session carries on with the
+    /// meter's clock as it was.
+    ClockRefused(Failure),
     /// A notification that decoded as a frame.
     #[non_exhaustive]
     Frame {
@@ -217,6 +222,8 @@ pub struct Session<T> {
     transport: T,
     config: SessionConfig,
     state: State,
+    /// A refusal of the clock in this connect's handshake, to report next.
+    clock_refused: Option<Failure>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -252,6 +259,7 @@ impl<T: Transport> Session<T> {
             transport,
             config,
             state: State::Down { retry: false },
+            clock_refused: None,
         }
     }
 
@@ -294,6 +302,9 @@ impl<T: Transport> Session<T> {
                     }
                 }
             }
+            State::Up { .. } if self.clock_refused.is_some() => Ok(SessionEvent::ClockRefused(
+                self.clock_refused.take().unwrap(),
+            )),
             State::Up { last_heard, idle } => {
                 // Before Idle, wait out the idle timeout; after it, the
                 // longer stall timeout. Both count from the last
@@ -358,6 +369,7 @@ impl<T: Transport> Session<T> {
     /// connection at a time, and holding it would hide it from every other
     /// program. A transport whose connect fails releases the link itself.
     async fn establish(&mut self) -> Result<(), SessionError> {
+        self.clock_refused = None;
         let limit = self.config.connect_timeout;
         let mut connected = false;
         let connect = async {
@@ -403,7 +415,13 @@ impl<T: Transport> Session<T> {
             }
         }
         if let Some(time) = self.config.clock.as_ref().and_then(Clock::now) {
-            self.exchange(&Command::set_rtc(&time)).await?;
+            // A meter that will not take the time is still worth reading.
+            match self.exchange(&Command::set_rtc(&time)).await {
+                Err(SessionError::Rejected(failure)) => self.clock_refused = Some(failure),
+                result => {
+                    result?;
+                }
+            }
         }
         self.transport.subscribe().await?;
         Ok(())

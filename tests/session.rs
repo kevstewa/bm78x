@@ -52,6 +52,8 @@ struct Meter {
     wrong_responses: usize,
     /// This many responses have a bad checksum.
     garbled_responses: usize,
+    /// Refuse the clock command, as a meter does a time it cannot take.
+    refuse_clock: bool,
     ops: Vec<Op>,
     /// Every packet written to the command characteristic, as bytes.
     written: Vec<Vec<u8>>,
@@ -72,6 +74,7 @@ impl Meter {
             hanging_reads: 0,
             wrong_responses: 0,
             garbled_responses: 0,
+            refuse_clock: false,
             ops: Vec::new(),
             written: Vec::new(),
             response: Vec::new(),
@@ -81,6 +84,16 @@ impl Meter {
     /// The meter's reply to a command, with the fake's faults applied.
     fn respond(&mut self, command: &ControlPacket) -> ControlPacket {
         let mut reply = common::respond(MAC, self.password, self.model, command);
+        if self.refuse_clock && command.id == 0x0010 {
+            // Error code 2, out of setting range.
+            reply = ControlPacket::failure_response(
+                MAC,
+                Failure {
+                    command: 0x0010,
+                    code: 2,
+                },
+            );
+        }
         if self.wrong_responses > 0 {
             self.wrong_responses -= 1;
             reply.id = 0x0004;
@@ -853,4 +866,66 @@ async fn a_clock_with_no_time_leaves_the_meter_clock_alone() {
     let mut session = Session::new(transport, config);
     expect_connected(&mut session).await;
     assert_eq!(handle.ops(), connect_ops());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_clock_is_reported_and_the_session_carries_on() {
+    // The clock is a convenience: a meter that will not take the time is
+    // still worth reading.
+    let mut meter = Meter::new();
+    meter.refuse_clock = true;
+    let (transport, handle) = fake(meter);
+    handle.notify(frame(1));
+    let mut config = SessionConfig::default();
+    config.clock = Some(Clock::new(|| Some(fixed_time())));
+    let mut session = Session::new(transport, config);
+
+    expect_connected(&mut session).await;
+    match next(&mut session).await {
+        SessionEvent::ClockRefused(failure) => {
+            assert_eq!((failure.command, failure.code), (0x0010, 2));
+        }
+        other => panic!("expected ClockRefused, got {other:?}"),
+    }
+    assert_eq!(reading_of(next(&mut session).await), 1);
+    // Notifications were enabled despite the refusal.
+    assert_eq!(
+        handle.ops(),
+        vec![
+            Op::Connect,
+            Op::Command(0x0151),
+            Op::Command(0x0116),
+            Op::Command(0x0010),
+            Op::Subscribe,
+        ]
+    );
+
+    // It is reported again after a reconnect.
+    handle.send(LinkEvent::Disconnected);
+    assert!(matches!(
+        next(&mut session).await,
+        SessionEvent::Disconnected(_)
+    ));
+    expect_connected(&mut session).await;
+    assert!(matches!(
+        next(&mut session).await,
+        SessionEvent::ClockRefused(_)
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_not_reported_for_a_later_connect() {
+    let mut meter = Meter::new();
+    meter.refuse_clock = true;
+    let (transport, handle) = fake(meter);
+    let mut config = SessionConfig::default();
+    config.clock = Some(Clock::new(|| Some(fixed_time())));
+    let mut session = Session::new(transport, config);
+    expect_connected(&mut session).await;
+    // Closed before the refusal was read; the meter then takes the time.
+    session.close().await.unwrap();
+    handle.meter.lock().unwrap().refuse_clock = false;
+    handle.notify(frame(2));
+    expect_connected(&mut session).await;
+    assert_eq!(reading_of(next(&mut session).await), 2);
 }
