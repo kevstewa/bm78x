@@ -15,15 +15,17 @@ use crate::transport::{LinkEvent, Transport, TransportError};
 
 /// Gives the time to set the meter's clock to. See [`SessionConfig::clock`].
 #[derive(Clone)]
-pub struct Clock(Arc<dyn Fn() -> RtcTime + Send + Sync>);
+pub struct Clock(Arc<dyn Fn() -> Option<RtcTime> + Send + Sync>);
 
 impl Clock {
-    /// A clock that calls `now`.
-    pub fn new(now: impl Fn() -> RtcTime + Send + Sync + 'static) -> Self {
+    /// A clock that calls `now` on each connect. If it returns `None`, such
+    /// as when the host's clock is outside the years the meter takes, the
+    /// meter's clock is left as it is.
+    pub fn new(now: impl Fn() -> Option<RtcTime> + Send + Sync + 'static) -> Self {
         Clock(Arc::new(now))
     }
 
-    fn now(&self) -> RtcTime {
+    fn now(&self) -> Option<RtcTime> {
         (self.0)()
     }
 }
@@ -400,8 +402,8 @@ impl<T: Transport> Session<T> {
                 return Err(SessionError::WrongModel(args[0]));
             }
         }
-        if let Some(clock) = &self.config.clock {
-            self.exchange(&Command::set_rtc(&clock.now())).await?;
+        if let Some(time) = self.config.clock.as_ref().and_then(Clock::now) {
+            self.exchange(&Command::set_rtc(&time)).await?;
         }
         self.transport.subscribe().await?;
         Ok(())

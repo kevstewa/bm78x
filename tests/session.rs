@@ -366,7 +366,7 @@ fn fixed_time() -> RtcTime {
 async fn clock_is_set_before_subscribing() {
     let (transport, handle) = fake(Meter::new());
     let mut config = SessionConfig::default();
-    config.clock = Some(Clock::new(fixed_time));
+    config.clock = Some(Clock::new(|| Some(fixed_time())));
     let mut session = Session::new(transport, config);
 
     expect_connected(&mut session).await;
@@ -666,7 +666,7 @@ async fn the_clock_can_capture_state() {
     let offset = 3;
     let mut config = SessionConfig::default();
     config.clock = Some(Clock::new(move || {
-        RtcTime::new(2026, 10, 23, Weekday::Friday, 21 - offset, 47, 59).unwrap()
+        RtcTime::new(2026, 10, 23, Weekday::Friday, 21 - offset, 47, 59).ok()
     }));
     let mut session = Session::new(transport, config);
     expect_connected(&mut session).await;
@@ -842,4 +842,15 @@ fn applications_can_make_events_to_test_their_handling() {
         }
         other => panic!("expected BadFrame, got {other:?}"),
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_clock_with_no_time_leaves_the_meter_clock_alone() {
+    // Such as a host clock outside the years the meter takes.
+    let (transport, handle) = fake(Meter::new());
+    let mut config = SessionConfig::default();
+    config.clock = Some(Clock::new(|| None));
+    let mut session = Session::new(transport, config);
+    expect_connected(&mut session).await;
+    assert_eq!(handle.ops(), connect_ops());
 }
